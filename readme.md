@@ -1,40 +1,202 @@
-<p align="center"><img src="https://laravel.com/assets/img/components/logo-laravel.svg"></p>
+# AWS EC2 Container Services Demo
 
-<p align="center">
-<a href="https://travis-ci.org/laravel/framework"><img src="https://travis-ci.org/laravel/framework.svg" alt="Build Status"></a>
-<a href="https://packagist.org/packages/laravel/framework"><img src="https://poser.pugx.org/laravel/framework/d/total.svg" alt="Total Downloads"></a>
-<a href="https://packagist.org/packages/laravel/framework"><img src="https://poser.pugx.org/laravel/framework/v/stable.svg" alt="Latest Stable Version"></a>
-<a href="https://packagist.org/packages/laravel/framework"><img src="https://poser.pugx.org/laravel/framework/license.svg" alt="License"></a>
-</p>
+This repo is the example code for an PHP Laravel application.
 
-## About Laravel
+## Prerequisites:
 
-Laravel is a web application framework with expressive, elegant syntax. We believe development must be an enjoyable, creative experience to be truly fulfilling. Laravel attempts to take the pain out of development by easing common tasks used in the majority of web projects, such as:
+To have an Amazon AWS account
+* install the AWS CLI; follow instructions in [Amazon documentation](http://docs.aws.amazon.com/cli/latest/userguide/installing.html)
+* Configure AWS CLI by providing secret key and Secret Access Key, [Amazon documentation](http://docs.aws.amazon.com/cli/latest/userguide/cli-chap-getting-started.html)
+Install docker [https://docs.docker.com/engine/installation/](https://docs.docker.com/engine/installation/)
 
-- [Simple, fast routing engine](https://laravel.com/docs/routing).
-- [Powerful dependency injection container](https://laravel.com/docs/container).
-- Multiple back-ends for [session](https://laravel.com/docs/session) and [cache](https://laravel.com/docs/cache) storage.
-- Expressive, intuitive [database ORM](https://laravel.com/docs/eloquent).
-- Database agnostic [schema migrations](https://laravel.com/docs/migrations).
-- [Robust background job processing](https://laravel.com/docs/queues).
-- [Real-time event broadcasting](https://laravel.com/docs/broadcasting).
+Have an existing EC2 keypair, if don't you have one, follow the [Amazon instructions](http://docs.aws.amazon.com/AWSEC2/latest/UserGuide/ec2-key-pairs.html#having-ec2-create-your-key-pair)
+ 
+## How to Setup
 
-Laravel is accessible, yet powerful, providing tools needed for large, robust applications. A superb combination of simplicity, elegance, and innovation give you tools you need to build any application with which you are tasked.
+Just follow the commands displayed bellow to have the repo and docker image ready on your machine
 
-## Learning Laravel
+```bash
+git clone https://github.com/pjuarezd/containerServices.git
+cd containerService
+docker build -t ecs-service .
+```
 
-Laravel has the most extensive and thorough documentation and video tutorial library of any modern web application framework. The [Laravel documentation](https://laravel.com/docs) is thorough, complete, and makes it a breeze to get started learning the framework.
+After that go to [CloudFormation amazon console](https://us-west-2.console.aws.amazon.com/cloudformation/home?region=us-west-2#/stacks?filter=active)
 
-If you're not in the mood to read, [Laracasts](https://laracasts.com) contains over 900 video tutorials on a range of topics including Laravel, modern PHP, unit testing, JavaScript, and more. Boost the skill level of yourself and your entire team by digging into our comprehensive video library.
+Click on create an stack
 
-## Contributing
+Select file stack.yml and click nexy
 
-Thank you for considering contributing to the Laravel framework! The contribution guide can be found in the [Laravel documentation](http://laravel.com/docs/contributions).
+Provide parameters ins screen (Stackname and keypair)
 
-## Security Vulnerabilities
+Accept the AWS Cloudformation Acknowledge and click "Create"
+>> Note, Keypair should be an existing keypar in your aws account, if don't you have one create it befor execute cloudformation stack
 
-If you discover a security vulnerability within Laravel, please send an e-mail to Taylor Otwell at taylor@laravel.com. All security vulnerabilities will be promptly addressed.
+Amazon will take some time to create the stack of services, give it aroud 10 to 15 minutes, after that proceed to upload the Dodcker image in  ECS following the commands below.
 
-## License
+```bash
+aws ecr get-login > login.sh
 
-The Laravel framework is open-sourced software licensed under the [MIT license](http://opensource.org/licenses/MIT).
+#If you are on linux/mac execute this
+
+bash login.sh
+rm login.sh
+
+#If you are in windows, copy the content of login.sh file into a cmd or powershell console and execute it 
+
+docker tag ecs-service:latest {accountid}.dkr.ecr.us-west-2.amazonaws.com/ecs-service:latest
+docker push {accountid}.dkr.ecr.us-west-2.amazonaws.com/ecs-service
+```
+Then the service will be published, 
+
+Go to the [ECS console](https://us-west-2.console.aws.amazon.com/ecs/home?region=us-west-2#/clusters)
+
+Open the cluster "service-cluster"
+
+Open service  "ecs-service"
+
+Inside will be a single task, open it in the guid URL
+
+Under the "Containers" section a container named "ecs-service" will be listed, expand it in the left arrow and look for the property "External link"
+
+That is the IP and port where the servie is running, you can access it on the browser and see the Laravel application Runing
+
+# Files Description
+
+Here i will give a brief description of strategic files in the repo.
+
+
+## Dockerfile
+Dockerfile file contains instructions to install OS dependencies in the Docker container
+
+## startup.sh
+Startup.sh is an Shell script with instructions to start the execution of the Nginx and php-fpm services into the container
+
+
+## Stack.yml
+CloudFormation template, contains the details of the ECS Services, describes all the small pieces required to deploy the Containers in a service.
+
+### Template parameters
+** KeyPair **
+Is the name of the keypair that can be used to connect to the EC2 instances that belong to the cluster
+
+### Outputs:
+** EcsCluster **
+ECS Cluster ARN, just for reference
+
+# Template Details
+
+### ECR Repository
+
+ECR Repository is the place where the Docker images are storaged, instead of using dockerhub this project expects to have the repo in AWS Services
+
+```yaml
+ ServiceRepository: 
+    Type: "AWS::ECR::Repository"
+    Properties: 
+      RepositoryName: "ecs-service"
+
+```
+
+### Task Definition
+
+Task definition is the recipe of how the services or tasks are about to run in the cluster
+
+```yaml
+ServiceTaskDefinition: 
+    Type: "AWS::ECS::TaskDefinition"
+    Properties:
+      ContainerDefinitions:
+        - Name: "ecs-service"
+          Image: { "Fn::Join": ["",[ { "Ref": "AWS::AccountId" }, ".dkr.ecr.us-west-2.amazonaws.com/ecs-service:latest" ] ] } 
+          Memory: 600
+          MemoryReservation : 160
+          PortMappings:
+            - ContainerPort: 80
+              HostPort: 80
+```
+
+### Cluster
+
+Here are the elements required to create the cluster.
+
+A cluster is a set o EC2 Machines that work together to run docker services.
+
+Autoscaling group defines how much EC2 instances are be running and if the amoun increases or decreases over some events (Scaling policies)
+
+AutoScalingLaunchConfiguration are the characteristics of the EC2 VM that will be created, like AMI image, instance type, hard drive size, and so on.
+
+EC2DevInstanceProfile & EC2DevInstanceRole are the grant configurations that will allow handle EC2 resources to the CLuster (Create, destroy, asociate, etc)
+
+
+```yaml
+AutoScalingGroup:
+    Type: "AWS::AutoScaling::AutoScalingGroup"
+    Properties:
+      AvailabilityZones: 
+        Fn::GetAZs: ""
+      LaunchConfigurationName: { "Ref": "AutoScalingLaunchConfiguration" }
+      MinSize: 0
+      MaxSize: 3
+      DesiredCapacity: 1
+  AutoScalingLaunchConfiguration:
+    Type: "AWS::AutoScaling::LaunchConfiguration"
+    Properties:
+      ImageId: "ami-8e7bc4ee"
+      InstanceType: t2.micro
+      KeyName: { "Ref": "KeyPair" }
+      IamInstanceProfile: { "Ref": "EC2DevInstanceProfile" }
+      SecurityGroups:
+        - { "Ref": "FrontEndSecurityGroup" }
+      UserData: {
+        "Fn::Base64": { "Fn::Join": ["", [
+          "#!/bin/bash\n",
+          "echo ECS_CLUSTER=", { "Ref" : "EcsCluster" }, " >> /etc/ecs/ecs.config\n"
+        ] ] }
+      }
+      BlockDeviceMappings:
+        -
+          DeviceName: "/dev/xvdcz"
+          Ebs:
+             VolumeSize: 22
+             VolumeType: "gp2"
+  EC2DevInstanceProfile:
+    Type: "AWS::IAM::InstanceProfile"
+    Properties: 
+      Path: "/"
+      Roles: [ { "Ref": "EC2DevInstanceRole" } ]
+  EC2DevInstanceRole:
+    Type: "AWS::IAM::Role"
+    Properties:
+      AssumeRolePolicyDocument: {
+        "Version": "2012-10-17",
+        "Statement": [
+          {
+            "Effect": "Allow",
+            "Principal": { "Service": [ "ec2.amazonaws.com" ] },
+            "Action": [ "sts:AssumeRole" ]
+          }
+        ]
+      }
+      Path: "/"
+      ManagedPolicyArns: 
+        - "arn:aws:iam::aws:policy/service-role/AmazonEC2ContainerServiceforEC2Role"
+  EcsCluster:
+    Type: "AWS::ECS::Cluster"
+    Properties:
+      ClusterName: "service-cluster"
+
+```
+
+### Service
+The Service is the container running, this is created using the "template" so called TaskDefinition, and will be running in a designed cluster
+
+```yaml
+ ecsService:
+    Type: "AWS::ECS::Service"
+    Properties:
+      TaskDefinition: { "Ref": "ServiceTaskDefinition" }
+      Cluster: { "Ref": "EcsCluster" }
+      DesiredCount: 1
+    DependsOn: [ AutoScalingGroup, EcsCluster]
+```

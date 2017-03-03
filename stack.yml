@@ -1,0 +1,130 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: "ECS Service Stack"
+
+# Stack Parameters
+Parameters:  
+  KeyPair:
+    Type: "String"
+    Description: "The key pair that is allowed SSH access for ec2 instances"
+  
+# Stack Resources
+Resources:
+  FrontEndSecurityGroup:
+    Type: "AWS::EC2::SecurityGroup"
+    Properties:
+      GroupDescription: "Securtyroup Intended for internet facing services"
+      SecurityGroupIngress:
+        - IpProtocol: "tcp"
+          FromPort: "80"
+          ToPort: "80"
+          CidrIp: "0.0.0.0/0"
+        - IpProtocol: "tcp"
+          FromPort: "443"
+          ToPort: "443"
+          CidrIp: "0.0.0.0/0"
+        - IpProtocol: "tcp"
+          FromPort: "22"
+          ToPort: "22"
+          CidrIp: "0.0.0.0/0"
+#ECS
+  ServiceRepository: 
+    Type: "AWS::ECR::Repository"
+    Properties: 
+      RepositoryName: "ecs-service"
+  ServiceTaskDefinition: 
+    Type: "AWS::ECS::TaskDefinition"
+    Properties:
+      ContainerDefinitions:
+        - Name: "ecs-service"
+          Image: { "Fn::Join": ["",[ { "Ref": "AWS::AccountId" }, ".dkr.ecr.us-west-2.amazonaws.com/ecs-service:latest" ] ] } 
+          Memory: 600
+          MemoryReservation : 160
+          PortMappings:
+            - ContainerPort: 80
+              HostPort: 80
+  AutoScalingGroup:
+    Type: "AWS::AutoScaling::AutoScalingGroup"
+    Properties:
+      AvailabilityZones: 
+        Fn::GetAZs: ""
+      LaunchConfigurationName: { "Ref": "AutoScalingLaunchConfiguration" }
+      MinSize: 0
+      MaxSize: 3
+      DesiredCapacity: 1
+  AutoScalingLaunchConfiguration:
+    Type: "AWS::AutoScaling::LaunchConfiguration"
+    Properties:
+      ImageId: "ami-8e7bc4ee"
+      InstanceType: t2.micro
+      KeyName: { "Ref": "KeyPair" }
+      IamInstanceProfile: { "Ref": "EC2DevInstanceProfile" }
+      SecurityGroups:
+        - { "Ref": "FrontEndSecurityGroup" }
+      UserData: {
+        "Fn::Base64": { "Fn::Join": ["", [
+          "#!/bin/bash\n",
+          "echo ECS_CLUSTER=", { "Ref" : "EcsCluster" }, " >> /etc/ecs/ecs.config\n"
+        ] ] }
+      }
+      BlockDeviceMappings:
+        -
+          DeviceName: "/dev/xvdcz"
+          Ebs:
+             VolumeSize: 22
+             VolumeType: "gp2"
+  EC2DevInstanceProfile:
+    Type: "AWS::IAM::InstanceProfile"
+    Properties: 
+      Path: "/"
+      Roles: [ { "Ref": "EC2DevInstanceRole" } ]
+  EC2DevInstanceRole:
+    Type: "AWS::IAM::Role"
+    Properties:
+      AssumeRolePolicyDocument: {
+        "Version": "2012-10-17",
+        "Statement": [
+          {
+            "Effect": "Allow",
+            "Principal": { "Service": [ "ec2.amazonaws.com" ] },
+            "Action": [ "sts:AssumeRole" ]
+          }
+        ]
+      }
+      Path: "/"
+      ManagedPolicyArns: 
+        - "arn:aws:iam::aws:policy/service-role/AmazonEC2ContainerServiceforEC2Role"
+  EcsCluster:
+    Type: "AWS::ECS::Cluster"
+    Properties:
+      ClusterName: "service-cluster"
+  EcsServiceRole:
+    Type: "AWS::IAM::Role"
+    Properties:
+      AssumeRolePolicyDocument: {
+        "Version": "2012-10-17",
+        "Statement": [
+          {
+            "Effect": "Allow",
+            "Principal": {
+              "Service": [ "ecs.amazonaws.com" ]
+            },
+            "Action": [ "sts:AssumeRole" ]
+          }
+        ]
+      }
+      Path: "/"
+      ManagedPolicyArns: 
+        - arn:aws:iam::aws:policy/service-role/AmazonEC2ContainerServiceRole
+  ecsService:
+    Type: "AWS::ECS::Service"
+    Properties:
+      TaskDefinition: { "Ref": "ServiceTaskDefinition" }
+      Cluster: { "Ref": "EcsCluster" }
+      DesiredCount: 1
+    DependsOn: [ AutoScalingGroup, EcsCluster]
+  
+# Stack Outputs
+Outputs:
+  EcsCluster:
+    Description: "Amazon Resource Name (ARN) Ecs Cluster"
+    Value: { "Ref": "EcsCluster" }
